@@ -102,9 +102,9 @@ void parseOptions(int argc, char** argv)
 #ifdef GL
 class Ball : public Model {
 public:
-    Ball(std::string name, int id, float x, float y, float z) : Model(name, id), x(x), y(y), z(z) {
+    Ball(std::string name, int id, float x, float y, float z, float r) : Model(name, id), x(x), y(y), z(z) {
         Tab *setup_tab = GetParamsTab();
-        radius = new DoubleSpinBox(setup_tab->NewRow(), "radius :", "m", 0, 10, 0.1, 2, 0.5);
+        radius = new DoubleSpinBox(setup_tab->NewRow(), "radius :", "m", 0, 10, 0.1, 2, r);
         SetIsReady(true);
     }
 
@@ -137,30 +137,6 @@ private:
     DoubleSpinBox *radius;
     float x, y, z;
 };
-
-static std::vector<Ball*> generateObstaclesSafe(
-    int count,
-    float minX, float maxX,
-    float minY, float maxY,
-    float z = 0.0f)
-{
-  std::vector<Ball*> obs;
-  std::mt19937 rng(static_cast<unsigned>(std::time(nullptr)));
-  std::uniform_real_distribution<float> dx(minX, maxX), dy(minY, maxY);
-
-  for (int i = 0; i < count; ++i) {
-    float x = dx(rng);
-    float y = dy(rng);
-
-    // construit l'objet graphique/visuel ; ne modifie pas sa position
-    Ball* o = new Ball(std::string("obs_") + std::to_string(i), /*id*/ i + 1, x, y, z);
-
-    // Positionnement et ajout au simulateur doivent être faits avec
-    // les méthodes réelles de l'API (à appeler après inspection des headers).
-    obs.push_back(o);
-  }
-  return obs;
-}
 #endif
 
 int main(int argc, char* argv[]) {
@@ -180,7 +156,9 @@ int main(int argc, char* argv[]) {
   robot = new TwoWheelRobot(name, 0);
   
   // Generate obstacles
-  std::vector<Ball*> obstacles = generateObstaclesSafe(5, -4.0f, 4.0f, -4.0f, 4.0f);
+  new Ball("obs_1", 1, 1.5f, 1.5f, 0.0f, 0.3f);
+  new Ball("obs_2", 2, 3.0f, 3.5f, 0.0f, 0.4f);
+  new Ball("obs_3", 3, 0.8f, 4.2f, 0.0f, 0.25f);
 
   gui->setVisualizationCamera(robot);
   simu->RunSimu();
