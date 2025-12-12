@@ -66,10 +66,10 @@ dwa_path::dwa_path(string name, TargetController *controller)
                                      "DWA Costs");
     std::cout << "création du chemin suivi par le robot\n";
     // ========== Configuration initiale des obstacles ==========
-    trajectory->ClearObstacles();
+    /*trajectory->ClearObstacles();
     trajectory->AddObstacle(1.5f, 1.5f, 0.3f);
     trajectory->AddObstacle(3.0f, 3.5f, 0.4f);
-    trajectory->AddObstacle(0.8f, 4.2f, 0.25f);
+    trajectory->AddObstacle(0.8f, 4.2f, 0.25f);*/
     
     std::cerr << "[dwa_path] Initial obstacles configured\n";
 
@@ -203,6 +203,8 @@ void dwa_path::ComputeManualControls(void) {
 
 // ========== DÉMARRAGE DE LA NAVIGATION ==========
 void dwa_path::StartDriving(void) {
+    std::cout << "[DEBUG] behaviourMode AVANT: " 
+              << (behaviourMode == BehaviourMode_t::Manual ? "Manual" : "GotoGoal") << "\n";
     if (behaviourMode != BehaviourMode_t::GotoGoal) {
         // Vérification VRPN
         if (!ugvVrpn->IsTracked(100)) {
@@ -221,9 +223,9 @@ void dwa_path::StartDriving(void) {
         trajectory->SetEnd(goal);
 
         // Mise à jour des obstacles (optionnel)
-        trajectory->ClearObstacles();
+        /*trajectory->ClearObstacles();
         trajectory->AddObstacle(2.0f, 2.0f, 0.3f);
-        trajectory->AddObstacle(3.5f, 3.5f, 0.4f);
+        trajectory->AddObstacle(3.5f, 3.5f, 0.4f);*/
 
         // Démarrage de la trajectoire
         trajectory->StartTraj(ugv_2Dpos);
@@ -235,10 +237,12 @@ void dwa_path::StartDriving(void) {
 
         // Changement de mode
         behaviourMode = BehaviourMode_t::GotoGoal;
-
+        
         std::cout << "[dwa_path] Started DWA from (" << ugv_2Dpos.x << ", " 
                   << ugv_2Dpos.y << ") toward goal (" << goal.x << ", " 
                   << goal.y << ")\n";
+        std::cout << "[DEBUG] behaviourMode APRÈS: " 
+              << (behaviourMode == BehaviourMode_t::Manual ? "Manual" : "GotoGoal") << "\n";
     }
 }
 
@@ -253,11 +257,12 @@ void dwa_path::StopDriving(void) {
 }
 
 // ========== CONTRÔLE AVEC DWA ==========
+// ========== CONTRÔLE AVEC DWA ==========
 void dwa_path::ComputeGotoGoalControls(void) {
     // Paramètres de contrôle
     const float epsilon_pos = 0.05f;      // Seuil position : 5 cm
     const float epsilon_vel = 0.01f;      // Seuil vitesse : 1 cm/s
-    const float alpha_filter = 0.3f;      // Coefficient filtre passe-bas
+    const float alpha_filter = 0.7f;      // Coefficient filtre passe-bas
 
     Vector3Df ugv_pos3, ugv_vel3;
     Vector2Df ugv_2Dpos, ugv_2Dvel;
@@ -286,13 +291,13 @@ void dwa_path::ComputeGotoGoalControls(void) {
     }
 
     // ========== CALCUL DES ERREURS ==========
-    // CORRECTION :
-    pos_error = traj_pos - ugv_2Dpos; // Consigne - Mesure
-    vel_error = traj_vel - ugv_2Dvel; // Vitesse Consigne - Vitesse Mesure
+    pos_error = traj_pos - ugv_2Dpos;
+    vel_error = traj_vel - ugv_2Dvel;
 
-    // Debug
+    // Debug positions
     std::cout << "Robot: (" << ugv_2Dpos.x << ", " << ugv_2Dpos.y << ") "
-              << "DWA target: (" << traj_pos.x << ", " << traj_pos.y << ")\n";
+              << "DWA target: (" << traj_pos.x << ", " << traj_pos.y << ")"
+              << " | Error: (" << pos_error.x << ", " << pos_error.y << ")\n";
 
     // Reset PID si erreur négligeable
     if (pos_error.GetNorm() < epsilon_pos && vel_error.GetNorm() < epsilon_vel) {
@@ -309,6 +314,9 @@ void dwa_path::ComputeGotoGoalControls(void) {
     float u_x = uX->Output();
     float u_y = uY->Output();
 
+    // DEBUG PID
+    std::cout << "PID outputs: u_x=" << u_x << " u_y=" << u_y << "\n";
+
     // ========== TRANSFORMATION REPÈRE MONDE → ROBOT ==========
     Quaternion vrpnQuaternion;
     ugvVrpn->GetQuaternion(vrpnQuaternion);
@@ -320,20 +328,28 @@ void dwa_path::ComputeGotoGoalControls(void) {
     float vx_command = cosf(yaw) * u_x + sinf(yaw) * u_y;
     float wz_command = (-sinf(yaw) * u_x + cosf(yaw) * u_y) / Lval;
 
+    // DEBUG TRANSFORMATION
+    std::cout << "yaw=" << yaw << " | vx_cmd=" << vx_command 
+              << " wz_cmd=" << wz_command << "\n";
+
     // ========== FILTRE PASSE-BAS ==========
     static float vx_filtered = 0.0f;
     static float wz_filtered = 0.0f;
     vx_filtered = alpha_filter * vx_command + (1.0f - alpha_filter) * vx_filtered;
     wz_filtered = alpha_filter * wz_command + (1.0f - alpha_filter) * wz_filtered;
 
-    // ========== ZONE MORTE ==========
+    // ========== ZONE MORTE (optionnelle) ==========
     if (fabsf(vx_filtered) < epsilon_vel) vx_filtered = 0.0f;
     if (fabsf(wz_filtered) < epsilon_vel) wz_filtered = 0.0f;
 
-    // ========== ENVOI DES COMMANDES ==========
+    // ========== ENVOI DES COMMANDES CALCULÉES ==========
+    // CORRECTION FINALE : Utilise les commandes calculées
+    GetUgv()->GetUgvControls()->SetControls(-vx_filtered, -wz_filtered);
     
-    GetUgv()->GetUgvControls()->SetControls(-5, -2);
+    // Si le robot va dans le mauvais sens, testez avec les signes inversés:
+    // GetUgv()->GetUgvControls()->SetControls(-vx_filtered, -wz_filtered);
 
-    // Debug
-    //std::cerr << "Commands: vx=" << vx_filtered << " wz=" << wz_filtered << "\n";
+    // DEBUG FINAL
+    std::cout << "FINAL Commands sent: vx=" << vx_filtered 
+              << " wz=" << wz_filtered << "\n\n";
 }
