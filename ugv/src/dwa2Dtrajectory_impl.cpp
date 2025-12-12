@@ -374,6 +374,8 @@ void dwa2Dtrajectory_impl::Update(Time time) {
         } else if (w_cmd < -params.w_max) {
             w_cmd = -params.w_max;
         }
+        std::cerr << "[DWA] v_cmd=" << v_cmd << " w_cmd=" << w_cmd 
+                  << " dist_to_goal=" << dist_to_goal << "\n";
         
         // ========== Mise à jour de l'état du robot ==========
         float old_px = pos.x;
