@@ -257,17 +257,18 @@ void dwa_path::StopDriving(void) {
 }
 
 // ========== CONTRÔLE AVEC DWA ==========
-// ========== CONTRÔLE AVEC DWA ==========
 void dwa_path::ComputeGotoGoalControls(void) {
     // Paramètres de contrôle
     const float epsilon_pos = 0.05f;      // Seuil position : 5 cm
     const float epsilon_vel = 0.01f;      // Seuil vitesse : 1 cm/s
     const float alpha_filter = 0.7f;      // Coefficient filtre passe-bas
+    const float stop_distance = 0.2f;     // Distance réelle au but pour arrêter (20 cm)
 
     Vector3Df ugv_pos3, ugv_vel3;
     Vector2Df ugv_2Dpos, ugv_2Dvel;
     Vector2Df pos_error, vel_error;
     Vector2Df traj_pos, traj_vel;
+    Vector2Df goal_pos;
 
     // ========== LECTURE DES CAPTEURS ==========
     ugvVrpn->GetPosition(ugv_pos3);
@@ -281,28 +282,34 @@ void dwa_path::ComputeGotoGoalControls(void) {
     // Récupération du waypoint calculé par DWA
     trajectory->GetPosition(traj_pos);
     trajectory->GetSpeed(traj_vel);
+    trajectory->GetEnd(goal_pos); // Récupérer la position finale réelle
 
-    // ========== VÉRIFICATION D'ARRIVÉE ==========
-    if (!trajectory->IsRunning()) {
-        std::cout << "[dwa_path] Goal reached! Stopping.\n";
+    // ========== CALCUL DE LA DISTANCE RÉELLE AU BUT ==========
+    float real_dist_to_goal = (goal_pos - ugv_2Dpos).GetNorm();
+
+    // ========== VÉRIFICATION D'ARRIVÉE (CORRIGÉE) ==========
+    // On arrête SEULEMENT si la trajectoire est finie ET que le robot est proche du but réel
+    if (!trajectory->IsRunning() && real_dist_to_goal < stop_distance) {
+        std::cout << "[dwa_path] Goal reached (Physics)! Stopping.\n";
         GetUgv()->GetUgvControls()->SetControls(0, 0);
         behaviourMode = BehaviourMode_t::Manual;
         return;
     }
+    // Note: Si trajectory n'est plus "running" (le lapin virtuel est arrivé), 
+    // traj_pos reste fixe au goal, donc le PID continuera de tirer le robot vers la fin.
 
     // ========== CALCUL DES ERREURS ==========
     pos_error = traj_pos - ugv_2Dpos;
     vel_error = traj_vel - ugv_2Dvel;
 
     // Debug positions
-    std::cout << "Robot: (" << ugv_2Dpos.x << ", " << ugv_2Dpos.y << ") "
-              << "DWA target: (" << traj_pos.x << ", " << traj_pos.y << ")"
-              << " | Error: (" << pos_error.x << ", " << pos_error.y << ")\n";
+    /*std::cout << "Robot: (" << ugv_2Dpos.x << ", " << ugv_2Dpos.y << ") "
+              << "Target: (" << traj_pos.x << ", " << traj_pos.y << ")"
+              << " | RealDist: " << real_dist_to_goal << "\n";*/
 
-    // Reset PID si erreur négligeable
+    // Reset PID si erreur négligeable (optionnel)
     if (pos_error.GetNorm() < epsilon_pos && vel_error.GetNorm() < epsilon_vel) {
-        uX->Reset();
-        uY->Reset();
+        // uX->Reset(); uY->Reset(); // Souvent mieux de ne pas reset si on veut maintenir la position
     }
 
     // ========== CONTRÔLE PID ==========
@@ -314,9 +321,6 @@ void dwa_path::ComputeGotoGoalControls(void) {
     float u_x = uX->Output();
     float u_y = uY->Output();
 
-    // DEBUG PID
-    std::cout << "PID outputs: u_x=" << u_x << " u_y=" << u_y << "\n";
-
     // ========== TRANSFORMATION REPÈRE MONDE → ROBOT ==========
     Quaternion vrpnQuaternion;
     ugvVrpn->GetQuaternion(vrpnQuaternion);
@@ -325,12 +329,9 @@ void dwa_path::ComputeGotoGoalControls(void) {
     float Lval = l->Value();
     if (Lval < 1e-3f) Lval = 1e-3f;
 
+    // Transformation cinématique standard
     float vx_command = cosf(yaw) * u_x + sinf(yaw) * u_y;
     float wz_command = (-sinf(yaw) * u_x + cosf(yaw) * u_y) / Lval;
-
-    // DEBUG TRANSFORMATION
-    std::cout << "yaw=" << yaw << " | vx_cmd=" << vx_command 
-              << " wz_cmd=" << wz_command << "\n";
 
     // ========== FILTRE PASSE-BAS ==========
     static float vx_filtered = 0.0f;
@@ -342,14 +343,11 @@ void dwa_path::ComputeGotoGoalControls(void) {
     if (fabsf(vx_filtered) < epsilon_vel) vx_filtered = 0.0f;
     if (fabsf(wz_filtered) < epsilon_vel) wz_filtered = 0.0f;
 
-    // ========== ENVOI DES COMMANDES CALCULÉES ==========
-    // CORRECTION FINALE : Utilise les commandes calculées
-    GetUgv()->GetUgvControls()->SetControls(-vx_filtered, -wz_filtered);
-    
-    // Si le robot va dans le mauvais sens, testez avec les signes inversés:
-    // GetUgv()->GetUgvControls()->SetControls(-vx_filtered, -wz_filtered);
+    // ========== ENVOI DES COMMANDES (CORRIGÉ) ==========
+    // CORRECTION MAJEURE : Suppression des signes "-" qui faisaient reculer le robot
+    // Si u_x est positif (cible devant), vx_command est positif. Le robot doit avancer.
+    GetUgv()->GetUgvControls()->SetControls(vx_filtered, wz_filtered);
 
     // DEBUG FINAL
-    std::cout << "FINAL Commands sent: vx=" << vx_filtered 
-              << " wz=" << wz_filtered << "\n\n";
+    //std::cout << "CMD sent: vx=" << vx_filtered << " wz=" << wz_filtered << "\n";
 }
