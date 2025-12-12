@@ -109,7 +109,7 @@ public:
     }
 
     void Draw(void) {
-        node = getGui()->getSceneManager()->addSphereSceneNode(100, 16, getSceneNode());
+        node = getGui()->getSceneManager()->addSphereSceneNode(10.0f, 16, getSceneNode());
         
         ITexture *texture = getGui()->getTexture("ball.jpg");
         if(texture) node->setMaterialTexture(0, texture);
@@ -122,6 +122,9 @@ public:
     }
     
     void AnimateModel(void) {
+        // Mettre à jour la position à chaque frame pour s'assurer qu'elle est correcte
+        node->setPosition(vector3df(x, y, z));
+        
         if (radius->ValueChanged() == true) {
             node->setScale(vector3df(radius->Value(), radius->Value(), radius->Value()));
         }

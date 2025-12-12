@@ -33,7 +33,7 @@ dwa2Dtrajectory_impl::dwa2Dtrajectory_impl(
     alpha = new DoubleSpinBox(reglages_groupbox->NewRow(), "alpha (heading)", "", 0.0, 10.0, 0.1, 1.5);
     beta = new DoubleSpinBox(reglages_groupbox->LastRowLastCol(), "beta (velocity)", "", 0.0, 10.0, 0.1, 1.0);
     gamma = new DoubleSpinBox(reglages_groupbox->LastRowLastCol(), "gamma (obstacle)", "", 0.0, 10.0, 0.1, 1.0);
-    epsilon = new DoubleSpinBox(reglages_groupbox->LastRowLastCol(), "epsilon (collision)", " m", 0.0, 1.0, 0.05, 3,0.1);
+    epsilon = new DoubleSpinBox(reglages_groupbox->LastRowLastCol(), "epsilon (collision)", " m", 0.0, 1.0, 0.05, 0.1);  // CORRECTION: 3,0.1 -> 0.1
     
     // ========== Matrice de sortie (pos, vel, acc, jerk) ==========
     MatrixDescriptor *desc = new MatrixDescriptor(4, 2);
@@ -82,7 +82,7 @@ dwa2Dtrajectory_impl::~dwa2Dtrajectory_impl() {
 
 // ========== GESTION DES OBSTACLES ==========
 
-void dwa2Dtrajectory_impl::SetObstacles(const std::vector<Obstacle> &obs) {
+/*void dwa2Dtrajectory_impl::SetObstacles(const std::vector<Obstacle> &obs) {
     obstacles = obs;
     std::cerr << "[DWA] Set " << obstacles.size() << " obstacles\n";
 }
@@ -95,7 +95,7 @@ void dwa2Dtrajectory_impl::AddObstacle(float x, float y, float radius) {
 void dwa2Dtrajectory_impl::ClearObstacles() {
     obstacles.clear();
     std::cerr << "[DWA] Cleared all obstacles\n";
-}
+}*/
 
 // ========== GETTERS/SETTERS ==========
 
@@ -207,7 +207,7 @@ SimulatedTrajectory dwa2Dtrajectory_impl::SimTrajectory(float v, float w,
 
 // ========== DISTANCE MINIMALE AUX OBSTACLES ==========
 
-float dwa2Dtrajectory_impl::MinimalDistance(const SimulatedTrajectory &traj) {
+/*float dwa2Dtrajectory_impl::MinimalDistance(const SimulatedTrajectory &traj) {
     if (obstacles.empty()) {
         return std::numeric_limits<float>::infinity();
     }
@@ -297,7 +297,7 @@ void dwa2Dtrajectory_impl::CalcVelocityCommand(float &v_cmd, float &w_cmd) {
     // Debug: affiche la commande choisie
     std::cerr << "[DWA] Best: v=" << v_cmd << " w=" << w_cmd 
               << " score=" << best_score << "\n";
-}
+}*/
 
 // ========== UPDATE PRINCIPAL ==========
 
@@ -352,23 +352,51 @@ void dwa2Dtrajectory_impl::Update(Time time) {
         is_running = false;
         std::cerr << "[DWA] Goal reached! Distance=" << dist_to_goal << "\n";
     } else {
-        // ========== Calcul de la commande DWA ==========
-        float v_cmd, w_cmd;
-        CalcVelocityCommand(v_cmd, w_cmd);
+        // ========== Calcul de la commande simple (contrôleur proportionnel) ==========
+        // CORRECTION: Calcul de l'angle vers le goal depuis la position ACTUELLE
+        float goal_dir = atan2f(goal_pos.y - pos.y, goal_pos.x - pos.x);
+        
+        // Commande de vitesse proportionnelle à la distance
+        float v_cmd = 0.8f * dist_to_goal;
+        
+        // Limiter la vitesse linéaire à v_max
+        if (v_cmd > params.v_max) {
+            v_cmd = params.v_max;
+        }
+        
+        // Commande de vitesse angulaire proportionnelle à l'erreur d'angle
+        float angle_error = AngDiff(goal_dir, angle_off);
+        float w_cmd = 0.4f * angle_error;
+        
+        // Limiter la vitesse angulaire à w_max
+        if (w_cmd > params.w_max) {
+            w_cmd = params.w_max;
+        } else if (w_cmd < -params.w_max) {
+            w_cmd = -params.w_max;
+        }
         
         // ========== Mise à jour de l'état du robot ==========
         float old_px = pos.x;
         float old_py = pos.y;
+        float old_vx = vel.x;
+        float old_vy = vel.y;   
+        float old_ax = acc.x;
+        float old_ay = acc.y;   
         
+        // CORRECTION: Utiliser angle_off (orientation actuelle) pas theta_end
         RobotMotion(pos.x, pos.y, angle_off, v_cmd, w_cmd, delta_t);
         
         // Mise à jour de la vitesse (dérivée de position)
         vel.x = (pos.x - old_px) / delta_t;
         vel.y = (pos.y - old_py) / delta_t;
         
-        // Accélération (simplifiée)
-        acc = Vector2Df(0, 0);
-        jerk = Vector2Df(0, 0);
+        // Mise à jour de l'accélération (dérivée de vitesse)
+        acc.x = (vel.x - old_vx) / delta_t;
+        acc.y = (vel.y - old_vy) / delta_t;
+        
+        // Mise à jour du jerk (dérivée de l'accélération)
+        jerk.x = (acc.x - old_ax) / delta_t;
+        jerk.y = (acc.y - old_ay) / delta_t;
     }
     
     CurrentTime += delta_t;
